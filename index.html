@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html style="position:relative;">
+<head>
+<title>Perma360d - Permaweb to store your 360 photo moments.</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" >
+<script src="https://unpkg.com/arweave/bundles/web.bundle.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/aframe/0.7.1/aframe.min.js"></script>
+</head>
+
+<style>
+.arview{
+	position: static;
+	display: none;
+}
+.close{
+	position: absolute;
+	display: block;
+	z-index: 1;
+	top: 10px;
+  right: 10px;
+}
+</style>
+<body style="overflow:auto;background-color:#ffc46d;">
+
+<nav class="navbar navbar-dark" style="background-color: #ac6600;">
+  <!-- Navbar content -->
+	<a class="navbar-brand" href="#">Perma360d</a>
+</nav>
+
+<div class="container mt-5" style="background-color: #fadaab;padding: 30px;">
+  <!-- Content here -->
+	<img src="icon.png" width="80"><p style="font-size:30px;font-weight:bold;">Perma360d</p>
+	<p style="text-decoration: underline;">Save your 360 degree photo moments.</p>
+	<div class="file-input" id="itlog">
+		<input type="file" id="file" onchange="login(this.files)" >
+		<div id="desc">Select a keyfile to login.</div>
+	</div>
+
+	<div id="profile">
+
+	</div>
+
+		<div id="dash" style="display:none;">
+				<h4 class="mt-4"><u>Upload your 360 Photo.</u></h4>
+				<div class="file-input">
+					<input type="file" id="file" onchange="upload(this.files)" >
+				</div>
+
+				<div id="imgupload" class="mt-3"></div>
+				<div id="imglist">
+						<h4 class="mt-4"><u>Your 360 photo saved.</u></h4>
+				</div>
+		</div>
+</div>
+
+<a-scene class="arview" id="arview"></a-scene>
+<br/>
+<script>
+
+const arweave = Arweave.init({host:"arweave.net",port:443,logging:!0,protocol:"https"});
+arweave.api.config.timeout = 15000 * 60 * 1.5;
+var wallet = {};
+
+function login (files) {
+    var fr = new FileReader()
+    fr.onload = function (ev) {
+        try {
+            wallet = JSON.parse(ev.target.result)
+						$('#itlog').remove();
+						$('#dash').show();
+						showWalletAddress();
+						fetchLastImages();
+        } catch (err) {
+            alert('Error logging in: ' + err)
+        }
+    }
+    fr.readAsText(files[0])
+}
+
+function upload (files) {
+    var fr = new FileReader()
+    fr.onload = function (ev) {
+        try {
+            var uploadresult = ev.target.result;
+
+						if (uploadresult.slice(11,14) === "jpg" || uploadresult.slice(11,14) === "jpe" || uploadresult.slice(11,14) === "png") {
+								toDataUrl(uploadresult, function(myBase64) {
+
+										var base64btoa = window.btoa(myBase64);
+
+												if (confirm('Are you sure upload image/photo to arweave ?')) {
+														uptoblock(base64btoa);
+												} else {
+
+												}
+
+								});
+						}else {
+							alert("Please select only JPG/JPEG or PNG !");
+						}
+
+        } catch (err) {
+            alert('Error logging in: ' + err)
+        }
+    }
+    fr.readAsDataURL(files[0])
+}
+
+function closeView() {
+		document.getElementById('arview').style.display = "none";
+		$('#panorama').remove();
+		$('#skye').remove();
+		$('#btnclose').remove();
+}
+
+function showAR(eta) {
+
+		$('#arview').append('<button id="btnclose" class="close" onclick="closeView()">&#10006;</button><img id="panorama" src="icon.png"/><a-sky id="skye" src="#panorama" rotation="0 -90 0"></a-sky>');
+		document.getElementById('arview').style.display = "block";
+		document.querySelector('#panorama').setAttribute('src', eta);
+
+}
+
+async function showWalletAddress() {
+		arweave.wallets.jwkToAddress(wallet).then((res) => {
+		var address = res;
+		$('#profile').append('<h4 class="mt-4"><u>Wallet.</u></h4><p>'+address+'</p>');
+	});
+}
+
+async function uptoblock(images){
+
+ try {
+	 let transaction =  await arweave.createTransaction({
+						data: images
+				}, wallet)
+			transaction.addTag('Content-Type', 'text/html');
+		  transaction.addTag('appsname', 'perma360degree');
+
+			await arweave.transactions.sign(transaction,wallet);
+		 const response = await arweave.transactions.post(transaction);
+
+		 if (response.status === 200) {
+				 alert('Successfully upload image. Check on this id : '+transaction.id);
+		 }else {
+				alert('Failed, Must have balance minimum '+transaction.reward/1000000000000+' AR to send photo!');
+		 }
+ } catch (e) {
+ 		alert("Error send transaction to network! Please check your internet!");
+ }
+}
+
+function toDataUrl(url, callback) {
+    var xhr = new XMLHttpRequest();
+    xhr.onload = function() {
+        var reader = new FileReader();
+        reader.onloadend = function() {
+            callback(reader.result);
+        }
+        reader.readAsDataURL(xhr.response);
+    };
+    xhr.open('GET', url);
+    xhr.responseType = 'blob';
+    xhr.send();
+}
+
+async function fetchLastImages() {
+			arweave.wallets.jwkToAddress(wallet).then((res) => {
+					fetchLastImagesTx(res);
+			});
+}
+
+async function fetchLastImagesTx(res) {
+		const transaction = await arweave.arql({
+					op: "and",
+					expr1: {
+						op: "equals",
+						expr1: "from",
+						expr2: res
+					},
+					expr2: {
+							op:"equals",
+							expr1:"appsname",
+							expr2:"perma360degree"
+					}
+		})
+
+		transaction.forEach(async function(item, i){
+				fetchLastImagesTxShow(item);
+		});
+
+}
+
+async function fetchLastImagesTxShow(res) {
+				arweave.transactions.getData(res, {decode: true, string: true}).then(data => {
+				  var ux = window.atob(data);
+					$('#imglist').append('<a href="javascript:void(0)" id="'+ux+'" onclick="showAR(this.id)" title="click to show"><img src="'+ux+'" width="100" height="100" style="margin:5px;border-radius: 10px;border: solid 2px white;"></a>');
+				});
+}
+</script>
+
+</body>
+</html>
